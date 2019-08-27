@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: CloudWatch Dashboard
+
+# Metadata:
+
+Parameters:
+  SiteName:
+    Type: String
+    Default: SiteName
+    Description: Site Name for Health Check Target
+  Type:
+    Type: String
+    Default: HTTPS
+    AllowedValues:
+      - HTTP
+      - HTTPS
+  ResourcePath:
+    Type: String
+    Default: /index.html
+  CheckSourceRegions:
+    Type: String
+    Default: WorldWide
+    AllowedValues:
+      - AsiaOnly
+      - WorldWide
+  Port:
+    Type: Number
+    Default: 443
+  TargetDomain:
+    Type: String
+    Default: example.com
+
+Mappings:
+  HealthCheckConfig: 
+    Regions:
+      AsiaOnly:
+        - ap-southeast-1
+        - ap-southeast-2
+        - ap-northeast-1
+      WorldWide: 
+        - us-east-1
+        - us-west-1
+        - us-west-2
+        - eu-west-1
+        - ap-southeast-1
+        - ap-southeast-2
+        - ap-northeast-1
+        - sa-east-1
+
+Conditions:
+  IsTLS: !Equals [ !Ref Type, HTTPS ]
+
+Resources:
+  route53HealthCheck:
+    Type: AWS::Route53::HealthCheck
+    Properties:
+      HealthCheckConfig: 
+        AlarmIdentifier: !Ref AWS::NoValue
+        ChildHealthChecks: !Ref AWS::NoValue
+        EnableSNI: 
+          Fn::If:
+          - IsTLS
+          - true
+          - !Ref AWS::NoValue
+        FailureThreshold: 3
+        FullyQualifiedDomainName: !Ref TargetDomain
+        HealthThreshold: !Ref AWS::NoValue
+        InsufficientDataHealthStatus: !Ref AWS::NoValue
+        Inverted: false
+        IPAddress: !Ref AWS::NoValue
+        MeasureLatency: false
+        Port: !Ref Port
+        Regions: !FindInMap [ HealthCheckConfig, Regions, !Ref CheckSourceRegions ]
+        RequestInterval: 30
+        ResourcePath: !Ref ResourcePath
+        SearchString: !Ref AWS::NoValue
+        Type: !Ref Type
+      HealthCheckTags:
+        - Key: Name
+          Value: !Sub ${SiteName}-HealthCheck
+  DashboardAvailability:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Ref SiteName
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 6,
+              "height": 6,
+              "properties": {
+                "metrics": [
+                  [
+                    {
+                      "expression": "AVG(METRICS())*100",
+                      "label": "Percentage",
+                      "id": "e1"
+                    }
+                  ],
+                  [
+                    "AWS/Route53",
+                    "HealthCheckStatus",
+                    "HealthCheckId",
+                    "${route53HealthCheck}",
+                    {
+                      "id": "m1",
+                      "visible": false
+                    }
+                  ]
+                ],
+                "view": "singleValue",
+                "region": "us-east-1",
+                "title": "直近30日",
+                "period": 300
+              }
+            },
+            {
+              "type": "metric",
+              "x": 6,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "view": "timeSeries",
+                "stacked": true,
+                "metrics": [
+                  [
+                    "AWS/Route53",
+                    "HealthCheckStatus",
+                    "HealthCheckId",
+                    "${route53HealthCheck}"
+                  ]
+                ],
+                "region": "us-east-1",
+                "title": "時系列",
+                "period": 300,
+                "yAxis": {
+                  "left": {
+                    "max": 1,
+                    "min": 0
+                  }
+                }
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardURL:
+    Description: Information about the value
+    Value: !Sub https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#dashboards:name=${SiteName}
